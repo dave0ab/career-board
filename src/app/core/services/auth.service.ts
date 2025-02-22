@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { BehaviorSubject, Observable, tap } from 'rxjs';
 import { Router } from '@angular/router';
 import { environment } from '../../../environments/environment';
@@ -20,24 +20,46 @@ export class AuthService {
   private isAuthenticatedSubject = new BehaviorSubject<boolean>(false);
   isAuthenticated$ = this.isAuthenticatedSubject.asObservable();
 
+  csrfToken: string = '';
+
+  public getHeaders(): HttpHeaders {
+    return new HttpHeaders({ 'X-CSRF-TOKEN': this.getCsrfToken() });
+  }
+
+  private getCsrfToken(): string {
+    const match = document.cookie.match(/XSRF-TOKEN=([^;]*)/);
+    return match ? match[1] : '';
+  }
+
   constructor(private http: HttpClient, private router: Router) {
     this.checkToken();
   }
 
   login(request: LoginRequest): Observable<LoginResponse> {
-    return this.http.post<LoginResponse>(`${this.baseUrl}/login`, request).pipe(
-      tap((response) => {
-        if (response.success && response.payload.token) {
-          this.setToken(response.payload.token);
-        }
+    localStorage.removeItem(this.TOKEN_KEY);
+    this.getCsrf();
+    return this.http
+      .post<LoginResponse>(`${this.baseUrl}/login`, request, {
+        headers: new HttpHeaders({ 'X-CSRF-TOKEN': this.csrfToken }),
+        withCredentials: true,
       })
-    );
+      .pipe(
+        tap((response) => {
+          if (response.success && response.payload.token) {
+            this.setToken(response.payload.token);
+          }
+        })
+      );
   }
 
   register(request: RegisterRequest): Observable<RegisterResponse> {
     return this.http.post<RegisterResponse>(
       `${this.baseUrl}/register`,
-      request
+      request,
+      {
+        headers: this.getHeaders(),
+        withCredentials: true,
+      }
     );
   }
 
@@ -53,6 +75,9 @@ export class AuthService {
   private checkToken(): void {
     const token = this.isValidToken();
     this.isAuthenticatedSubject.next(token);
+    if (!token) {
+      localStorage.removeItem(this.TOKEN_KEY);
+    }
   }
 
   logout() {
@@ -63,7 +88,6 @@ export class AuthService {
 
   isValidToken(): boolean {
     const token = localStorage.getItem(this.TOKEN_KEY);
-
     if (!token) return false;
 
     const decodedToken: JwtPayload = jwtDecode(token);
@@ -78,11 +102,9 @@ export class AuthService {
     try {
       const decodedToken: any = jwtDecode(token);
 
-      // Handle role as array or string
       if (Array.isArray(decodedToken.role)) {
         return decodedToken.role[0] || null;
       }
-
       return decodedToken.role || null;
     } catch (error) {
       console.error('Error decoding token:', error);
@@ -108,9 +130,17 @@ export class AuthService {
 
     try {
       const decodedToken: any = jwtDecode(token);
-      return decodedToken.sub || null; // 'sub' is commonly used for username in JWT
+      return decodedToken.sub || null;
     } catch {
       return null;
     }
+  }
+
+  getCsrf() {
+    return this.http
+      .get<{ token: string }>(`${this.baseUrl}/csrf/token`, {
+        withCredentials: true,
+      })
+      .subscribe((data) => (this.csrfToken = data.token));
   }
 }
