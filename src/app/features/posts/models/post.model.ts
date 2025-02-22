@@ -1,7 +1,7 @@
-import { postImage } from "./post-image.model";
+import { postImage } from './post-image.model';
 
 export interface Post {
-  postId: number;
+  postId: string;
   title: string;
   content: string;
   createdAt: string;
@@ -11,4 +11,3 @@ export interface Post {
   images: postImage[];
   moderatorComment: string;
 }
-
